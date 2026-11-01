@@ -46,9 +46,11 @@ ICON_PATTERNS = (
 # A small fraction of the *asteroid body*, NOT the whole icon.
 # Matte, believable minerals rather than pure, saturated RGB primaries.
 ART = {
-    "crystalline": {"coverage": 0.095, "colour": (93, 152, 185), "blend": 0.57},
-    "halide": {"coverage": 0.095, "colour": (166, 131, 185), "blend": 0.58},
-    "electrostatic": {"coverage": 0.105, "colour": (105, 116, 191), "blend": 0.57},
+    # Relative RGB channel offsets apply ONLY to existing source material veins.
+    # Offsets preserve every source facet, texture grain and shadow gradient.
+    "crystalline": {"coverage": 0.075, "delta": (-16, 5, 28)},
+    "halide": {"coverage": 0.065, "delta": (28, -18, 38)},
+    "electrostatic": {"coverage": 0.080, "delta": (-45, 20, 57)},
 }
 
 
@@ -172,14 +174,20 @@ def alter_only_mineral(img, family, kind):
     mask, coverage = material_mask(img, family, kind)
     output = original.copy()
     if np.any(mask):
-        colour = np.asarray(ART[family]["colour"], dtype=np.float32)
-        blend = ART[family]["blend"]
+        delta = np.asarray(ART[family]["delta"], dtype=np.float32)
         source = original[:, :, :3].astype(np.float32)
-        # Preserve the inherited stone/metal face lighting and local roughness.
-        light = (0.72 + np.mean(source, axis=2) / 290.0)
-        pigment = colour[None, None, :] * light[:, :, None]
-        mixed = (1 - blend) * source + blend * pigment
-        output[:, :, :3][mask] = np.clip(mixed[mask], 0, 255).astype(np.uint8)
+        # Feather *within* the selected mineral islands. No pixels beyond the
+        # asteroid-only mask can ever change, including the crusher arrows.
+        radius = 0.9 if max(img.size) <= 128 else max(1.2, min(3.8, max(img.size) / 120))
+        softness = np.asarray(
+            Image.fromarray(np.uint8(mask * 255), "L")
+            .filter(ImageFilter.GaussianBlur(radius)), dtype=np.float32
+        ) / 255.0
+        strength = 0.38 + 0.62 * softness
+        # Additive pigment deposits retain the exact source's detailed
+        # per-pixel variations. No flattening into one tinted fill colour.
+        edited = source + delta[None, None, :] * strength[:, :, None]
+        output[:, :, :3][mask] = np.clip(edited[mask], 0, 255).astype(np.uint8)
 
     # These pixel-identity checks are essential. They prove that the arrows,
     # transparent background, resource outputs, and non-target mineral surfaces
