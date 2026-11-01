@@ -108,7 +108,7 @@ def isolate_inclusions(image, family, standard_recipe=False):
     mask &= a > 48
 
     if standard_recipe:
-        # The original icon's golden crushing arrows occupy the lower half.
+        # The original icon's crushing arrows occupy the lower half.
         # Never recolour arrows or their existing highlights.
         row_index = np.arange(image.height, dtype=np.int32)[:, None]
         mask &= row_index < 30
