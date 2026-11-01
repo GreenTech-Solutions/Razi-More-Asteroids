@@ -50,11 +50,27 @@ All eight optional specialty recipes require valid K2SO prototypes and the relev
 
 **Icons:** crushing, advanced crushing, reprocessing, upcycling and K2SO-specialty recipe icons now composite the actual input-chunk graphic with the full-color icons of the materials returned. Iron stays iron-colored, copper stays copper-colored, and fluid icons keep their own palette. We no longer tint every ingredient the same color as the asteroid.
 
-## Original artwork, refreshed
+## Original artwork, selectively restored
 
-All eight families reuse the original asteroid geometry. Two new sets of variants were made by modifying existing Chemical and Crystalline textures rather than using generated artwork. Dense-Metal, Volatile, Halide and Electrostatic have distinctive updated shading. Icons are 64×64; the Mod Portal thumbnail is 144×144.
+The five original asteroid families (Chemical, Organic, Rock, Scrap and Uranium)
+use the original More Asteroids artwork, with no global tinting. The three new
+families reuse matching original geometry and change only selected asteroid
+mineral regions: Crystalline from Rock, Halide from Chemical, and Electrostatic
+from Scrap. Crushing arrows, output fragments, transparent backgrounds and
+non-selected material pixels retain their original colours.
 
-Material-specific artwork and lighting are documented in [Asteroid art direction](docs/ART_DIRECTION.md). The **96 existing PNGs** preserve their original silhouettes and transparency while using resource-matched mineral inclusions.
+The 56 icons and 40 asteroid entity colour textures remain at their original
+dimensions. Asteroid entities use the matching upstream Space Age normal and
+roughness maps **and neutral upstream lighting** so the renderer doesn't tint
+the whole asteroid. Recipe icons are layered from real ingredient/product
+prototypes at runtime, rather than using monochrome recipe artwork.
+
+The pinned, reproducible art generator is `scripts/restore-material-art.py`.
+Run `python scripts/restore-material-art.py` to regenerate PNGs, then
+`python scripts/restore-material-art.py --verify` to assert that the committed
+graphics match source. This developer-only script must **not** be included in
+the Factorio Mod Portal ZIP. See [Asteroid art direction](docs/ART_DIRECTION.md).
+
 
 ## Settings
 
@@ -63,7 +79,7 @@ Material-specific artwork and lighting are documented in [Asteroid art direction
 
 ## Packaging and release
 
-The source repository contains **no** `.py`, `.sh`, `.bat`, `.ps1`, or `.exe` files. Package the 1.1.0 release using the explicit allowlist:
+The repository includes a developer-only Python art generator, but the release ZIP must **exclude** scripts and workflows. Package version 1.2.0 using the explicit allowlist:
 
 ```sh
 mkdir -p dist
@@ -74,4 +90,4 @@ Check the ZIP contents before uploading. Factorio 2.1 in-game load/crafting test
 
 ## Original credits
 
-Based on [More Asteroids](https://mods.factorio.com/mod/More-Asteroids) by spartanlaser32, originally released under MIT. The upstream license is retained. [Source repository](https://github.com/Raziphel/Razi-More-Asteroids).
+Based on [More Asteroids](https://mods.factorio.com/mod/More-Asteroids) by spartanlaser32, originally released under MIT. The upstream license is retained. [Original source repository](https://github.com/spartanlaser32/More-Asteroids).
