@@ -184,9 +184,13 @@ def alter_only_mineral(img, family, kind):
             .filter(ImageFilter.GaussianBlur(radius)), dtype=np.float32
         ) / 255.0
         strength = 0.38 + 0.62 * softness
-        # Additive pigment deposits retain the exact source's detailed
-        # per-pixel variations. No flattening into one tinted fill colour.
-        edited = source + delta[None, None, :] * strength[:, :, None]
+        # Tiny icons need slightly stronger mineral contrast to remain
+        # identifiable at Factorio inventory scale. The mask itself is NEVER
+        # enlarged, and arrows/output fragments remain identical to upstream.
+        icon_contrast = 1.45 if kind in ("single", "crushing", "advanced") else 1.0
+        # Additive deposits retain the source's per-pixel texture and shadows.
+        # No flattening or whole-image hue/saturation edits.
+        edited = source + delta[None, None, :] * strength[:, :, None] * icon_contrast
         output[:, :, :3][mask] = np.clip(edited[mask], 0, 255).astype(np.uint8)
 
     # These pixel-identity checks are essential. They prove that the arrows,
