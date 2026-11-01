@@ -264,9 +264,11 @@
     ["uranium"] = "metallic",
     ["chemical"] = "oxide",
     ["organic"] = "carbonic",
-    ["crystalline"] = "oxide",
-    ["halide"] = "oxide",
-    ["electrostatic"] = "oxide"
+    -- New art is selectively adapted from the source materials. The normal
+    -- and roughness maps MUST match their unchanged source geometry.
+    ["crystalline"] = "carbonic", -- original petrified asteroid geometry
+    ["halide"] = "oxide",         -- original chemical asteroid geometry
+    ["electrostatic"] = "metallic" -- original scrap asteroid geometry
 
   }
 
