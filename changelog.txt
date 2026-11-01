@@ -1,4 +1,17 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.2.1
+Date: 02. 11. 2026
+  Graphics:
+    - Restore the original detailed Chemical, Organic, Rock, Scrap, and Uranium asteroid artwork.
+    - Refine Crystalline, Halide, and Electrostatic mineral accents without recoloring whole sprites.
+    - Preserve the source texture detail, transparent edges, crushing arrows, and recipe outputs.
+  Bugfixes:
+    - Remove colored lighting that washed over entire asteroid entities.
+    - Match custom asteroid textures to their source Space Age normal and roughness maps.
+  Info:
+    - Update original-art credits, release instructions, and graphics verification documentation.
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 26. 10. 2026
   Graphics:

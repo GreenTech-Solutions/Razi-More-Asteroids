@@ -79,11 +79,13 @@ the Factorio Mod Portal ZIP. See [Asteroid art direction](docs/ART_DIRECTION.md)
 
 ## Packaging and release
 
-The repository includes a developer-only Python art generator, but the release ZIP must **exclude** scripts and workflows. Package version 1.2.0 using the explicit allowlist:
+**Current release: 1.2.1.** This patch restores detailed upstream asteroid textures and corrects full-entity colour casting. Reprocessing, upcycling and other 1.2.0 gameplay features are unchanged.
+
+The repository includes a developer-only Python art generator, but the release ZIP must **exclude** scripts and workflows. Package version 1.2.1 using the explicit allowlist:
 
 ```sh
 mkdir -p dist
-git archive --format=zip --prefix=razi-more-asteroids_1.2.0/ -o dist/razi-more-asteroids_1.2.0.zip HEAD info.json LICENSE changelog.txt thumbnail.png settings.lua data.lua data-updates.lua data-final-fixes.lua asteroids.lua recipe.lua item.lua more-asteroids-spawn-definitions.lua locale graphics prototypes
+git archive --format=zip --prefix=razi-more-asteroids_1.2.1/ -o dist/razi-more-asteroids_1.2.1.zip HEAD info.json LICENSE changelog.txt thumbnail.png settings.lua data.lua data-updates.lua data-final-fixes.lua asteroids.lua recipe.lua item.lua more-asteroids-spawn-definitions.lua locale graphics prototypes
 ```
 
 Check the ZIP contents before uploading. Factorio 2.1 in-game load/crafting tests are still required with Space Age + RaziLib, with and without K2SO and Muluna/Quality. In particular, check reprocessing probability, quality upgrades, and the dynamically composed icons. See `docs/RELEASE_CHECKLIST.md`. This repository has not automatically published the mod to the Mod Portal.

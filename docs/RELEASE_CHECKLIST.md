@@ -1,11 +1,11 @@
-# First-public-release verification
+# Razi More Asteroids 1.2.1 release verification
 
-Candidate ZIP: `dist/razi-more-asteroids_1.2.0.zip`
+Candidate ZIP: `dist/razi-more-asteroids_1.2.1.zip`
 Status: **package-ready, engine validation pending**. Do not claim a completed in-game test until performed.
 
 ## Packaging gate
 
-Build with the `git archive` command in README.md, using only the explicitly listed Factorio files. Check the ZIP root is `razi-more-asteroids_1.2.0/` and that `unzip -l` shows no `.exe`, `.bat`, `.ps1`, `.sh`, or `.py` entries. The development repository includes a Python art generator, but the release archive must exclude it. This packaging check is not an in-game test.
+Build with the `git archive` command in README.md, using only the explicitly listed Factorio files. Check the ZIP root is `razi-more-asteroids_1.2.1/` and that `unzip -l` shows no `.exe`, `.bat`, `.ps1`, `.sh`, or `.py` entries. The development repository includes a Python art generator, but the release archive must exclude it. This packaging check is not an in-game test.
 
 ## Required manual startup tests
 
@@ -28,7 +28,7 @@ Build with the `git archive` command in README.md, using only the explicitly lis
 - [ ] Validate science progression and reasonable availability without unlocking high-tier resources too early.
 
 
-## New processing and compatibility tests (1.2.0)
+## Regression checks for 1.2.0 processing features (still required for 1.2.1)
 
 - [ ] Inspect all 16 custom crushing/advanced crushing recipe icons and all 8 new reprocessing icons. Distinct materials must use their actual, untinted sprite colors.
 - [ ] Research Asteroid reprocessing and confirm eight custom recipes are unlocked in the native crusher without replacing the vanilla three.
