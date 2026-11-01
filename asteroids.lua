@@ -192,38 +192,20 @@
     }
   }
 
-  -- Two new families share the source mod's original geometry, with
-  -- individually recolored texture atlases. Existing six IDs stay stable.
+  -- New families reuse the corresponding source material geometry and
+  -- receive asteroid-only mineral accents in their colour textures.
+  -- Existing six prototype IDs stay stable.
   asteroids_data.halide = table.deepcopy(asteroids_data.chemical)
   asteroids_data.halide.order = "ce"
-  asteroids_data.electrostatic = table.deepcopy(asteroids_data.crystalline)
+  asteroids_data.electrostatic = table.deepcopy(asteroids_data.scrap)
   asteroids_data.electrostatic.order = "bf"
-  asteroids_data.electrostatic.shading_data.lights[2].color = {0.34,0.47,0.95}
-
-  -- Material-matched scene lighting, preserving the source normal maps.
-  -- Differentiate mineral, biological and conductive faces at platform scale.
-  local lighting = {
-    uranium = {{0.94,1.0,0.90},{0.31,0.48,0.26},1.75},
-    rock = {{0.99,0.98,0.94},{0.52,0.43,0.32},1.65},
-    scrap = {{0.97,0.98,1.0},{0.56,0.30,0.21},2.0},
-    organic = {{0.92,1.0,0.91},{0.32,0.49,0.26},1.4},
-    chemical = {{0.89,1.0,0.99},{0.22,0.48,0.50},1.8},
-    crystalline = {{0.97,0.99,1.0},{0.40,0.49,0.59},2.35},
-    halide = {{0.96,0.96,1.0},{0.47,0.40,0.66},2.2},
-    electrostatic = {{0.90,0.96,1.0},{0.25,0.41,0.67},2.35}
-  }
-  local normal_strength = {
-    uranium = 1.18, rock = 1.18, scrap = 1.23, organic = 1.06,
-    chemical = 1.13, crystalline = 1.27, halide = 1.16,
-    electrostatic = 1.24
-  }
-  for family,light in pairs(lighting) do
-    local shade = asteroids_data[family].shading_data
-    shade.lights[1].color = light[1]
-    shade.lights[2].color = light[2]
-    shade.specular_strength = light[3]
-    shade.normal_strength = normal_strength[family] or shade.normal_strength
-  end
+  -- Keep upstream's neutral white/warm lighting for EVERY family.
+  -- A coloured fill light tinted the entire model even when only its mineral
+  -- inclusions were recoloured. Distinguish materials in the source diffuse
+  -- texture, not by tinting the complete asteroid during rendering.
+  -- The original five families preserve upstream normal/specular settings.
+  -- New families inherit the lighting and physical shading of their source:
+  -- crystalline = rock, halide = chemical, electrostatic = scrap.
 
   local collision_radiuses =
   {
