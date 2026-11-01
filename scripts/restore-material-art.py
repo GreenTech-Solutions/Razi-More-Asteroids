@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Restore the upstream material artwork while preserving Razi-only asteroid shapes.
+"""Rebuild More Asteroids artwork from original, high-detail source PNGs.
 
-Source: spartanlaser32/More-Asteroids (MIT), pinned to a reviewed revision.
-Only colour sprites/icons are changed. Never modify normal or roughness maps.
+The source is the MIT-licensed spartanlaser32/More-Asteroids repo, pinned below.
+All replacements are independently rebuilt from source, not re-tinted fork images.
+
+The five original families are restored without colour changes. The three new
+families replace only specific pigments/inclusions of carefully chosen original
+materials. All other pixels, local shading, fracture detail and alpha stay intact.
 """
 from __future__ import annotations
 
@@ -11,7 +15,6 @@ import io
 from pathlib import Path
 import urllib.request
 import zipfile
-import zlib
 
 import numpy as np
 from PIL import Image
@@ -22,201 +25,185 @@ ORIGINAL_ZIP = (
     "https://codeload.github.com/spartanlaser32/More-Asteroids/zip/"
     + ORIGINAL_COMMIT
 )
-FORK_BASE_ZIP = (
-    "https://codeload.github.com/Raziphel/Razi-More-Asteroids/zip/"
-    "57cf549e9a3db9694cc733e37a4310dc83cd5302"
-)
-RESTORED = ("chemical", "organic", "rock", "scrap", "uranium")
-CUSTOM = ("crystalline", "electrostatic", "halide")
-# Dark matrix, main mineral, secondary inclusion, and a sparing bright inclusion.
-PALETTES = {
-    "crystalline": (
-        (93, 109, 119), (187, 203, 213), (112, 169, 209), (228, 229, 218)
-    ),
-    "electrostatic": (
-        (70, 80, 103), (82, 137, 193), (161, 110, 184), (141, 220, 211)
-    ),
-    "halide": (
-        (92, 91, 110), (179, 168, 215), (136, 187, 202), (223, 219, 206)
-    ),
+
+# Parent artwork determines geometry AND the matching Space Age normal map.
+# See asteroid_map in asteroids.lua: carbonic for petrified, metallic for scrap,
+# oxide for chemical.
+PARENTS = {
+    "chemical": "chemical",
+    "organic": "organic",
+    "rock": "rock",
+    "scrap": "scrap",
+    "uranium": "uranium",
+    "crystalline": "petrified",
+    "halide": "chemical",
+    "electrostatic": "scrap",
 }
+ORIGINAL_FAMILIES = ("chemical", "organic", "rock", "scrap", "uranium")
+CUSTOM_FAMILIES = ("crystalline", "halide", "electrostatic")
+SIZES = ("chunk", "small", "medium", "big", "huge")
+ICON_PATTERNS = (
+    "{f}-asteroid-chunk.png",
+    "{f}-asteroid-crushing.png",
+    "advanced-{f}-asteroid-crushing.png",
+    "small-{f}-asteroid.png",
+    "medium-{f}-asteroid.png",
+    "big-{f}-asteroid.png",
+    "huge-{f}-asteroid.png",
+)
 
 
-def upstream_archive(url: str = ORIGINAL_ZIP) -> zipfile.ZipFile:
+def download_source():
     req = urllib.request.Request(
-        url, headers={"User-Agent": "Razi-More-Asteroids-art-refresh"}
+        ORIGINAL_ZIP, headers={"User-Agent": "Razi-More-Asteroids-source-art"}
     )
     with urllib.request.urlopen(req, timeout=60) as response:
-        payload = response.read(25_000_001)
-    if len(payload) > 25_000_000:
-        raise ValueError("Unexpected upstream archive size")
-    return zipfile.ZipFile(io.BytesIO(payload))
+        blob = response.read(25_000_001)
+    if len(blob) > 25_000_000:
+        raise ValueError("Source archive exceeded expected size")
+    return zipfile.ZipFile(io.BytesIO(blob))
 
 
-def image_from_zip(zf: zipfile.ZipFile, path: str) -> Image.Image:
-    found = [name for name in zf.namelist() if name.endswith("/" + path)]
-    if len(found) != 1:
-        raise FileNotFoundError(f"Expected one upstream copy of {path}, got {found}")
-    return Image.open(io.BytesIO(zf.read(found[0]))).convert("RGBA")
+def open_source(zf, path):
+    matches = [key for key in zf.namelist() if key.endswith("/" + path)]
+    if len(matches) != 1:
+        raise FileNotFoundError(f"Source asset not unique or absent: {path}")
+    return Image.open(io.BytesIO(zf.read(matches[0]))).convert("RGBA")
 
 
-def save_if_changed(image: Image.Image, dest: Path) -> bool:
+def original_icon(zf, name):
+    image = open_source(zf, "graphics/icons/" + name)
+    # Upstream is a complete 120x64 mip strip. The fork expects a 64x64 icon.
+    if image.size == (120, 64):
+        return image.crop((0, 0, 64, 64))
+    if image.size == (64, 64):
+        return image
+    raise ValueError(f"Unexpected icon format {name} = {image.size}")
+
+
+def isolate_inclusions(image, family, standard_recipe=False):
+    """Select only source-material pigments. No global hue/tint replacement.
+
+    crystalline: bright ochre-orange mineral inclusions in petrified rock;
+                 preserve the original dark carbonic rock matrix.
+    halide:      bright jade streaks in oxide rock; preserve original muted
+                 turquoise/green rock and deep crevices.
+    electrostatic: warm oxidised metal flakes in the scrap asteroid; preserve
+                 blue/steel metal, metal ridges and all shadows.
+
+    A pixel outside the mask is copied EXACTLY from upstream, bit for bit.
+    """
+    original = np.asarray(image.convert("RGBA")).copy()
+    rgb = original[:, :, :3].astype(np.float32)
+    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    a = original[:, :, 3]
+    if family == "crystalline":
+        mask = (r > 118) & (r > 1.32 * g) & (r > 1.36 * b) & ((r - g) > 25)
+    elif family == "halide":
+        mask = (g > 109) & (g > 1.07 * r) & (g > 1.08 * b) & ((g - b) > 18)
+    elif family == "electrostatic":
+        mask = (r > 105) & (r > 1.18 * g) & (r > 1.20 * b) & ((r - g) > 22)
+    else:
+        raise ValueError(f"Not a custom family: {family}")
+    mask &= a > 48
+
+    if standard_recipe:
+        # The original icon's golden crushing arrows occupy the lower half.
+        # Never recolour arrows or their existing highlights.
+        row_index = np.arange(image.height, dtype=np.int32)[:, None]
+        mask &= row_index < 30
+
+    hsv = np.asarray(image.convert("RGB").convert("HSV")).copy()
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    if family == "crystalline":
+        # Frost-blue quartz highlights in naturally dark fossilised stone.
+        # Preserve per-pixel brightness variations that form crystal facets.
+        cooler = (g > 75)
+        h[mask] = np.where(cooler[mask], 139, 163).astype(np.uint8)
+        s[mask] = np.where(cooler[mask], 100, 117).astype(np.uint8)
+        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 8).astype(np.uint8)
+    elif family == "halide":
+        # Icy lilac salt inclusions. Dark surrounding green rock remains original.
+        colder = (b > 55)
+        h[mask] = np.where(colder[mask], 183, 173).astype(np.uint8)
+        s[mask] = np.where(colder[mask], 93, 112).astype(np.uint8)
+        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 5).astype(np.uint8)
+    else:
+        # Swap rusty-orange ONLY into violet/cyan electrically conductive seams.
+        bright = (r > 161)
+        h[mask] = np.where(bright[mask], 173, 190).astype(np.uint8)
+        s[mask] = np.where(bright[mask], 168, 136).astype(np.uint8)
+
+    toned = np.asarray(Image.fromarray(hsv, "HSV").convert("RGB"))
+    changed = original.copy()
+    changed[mask, :3] = toned[mask]
+    output = Image.fromarray(changed, "RGBA")
+
+    assert np.array_equal(original[:, :, 3], changed[:, :, 3])
+    changed_pixels = np.any(original[:, :, :3] != changed[:, :, :3], axis=2)
+    opaque = original[:, :, 3] > 48
+    ratio = float(np.count_nonzero(changed_pixels & opaque)) / max(1, int(np.count_nonzero(opaque)))
+    # A strict ceiling catches accidental blanket transformations or arrow recolour.
+    if not 0.005 <= ratio <= 0.48:
+        raise ValueError(f"{family}: changed {ratio:.1%} of visible pixels; expected selected inclusions only")
+    return output, ratio
+
+
+def emit(image, destination, dry_run):
     image = image.convert("RGBA")
-    if dest.exists():
-        with Image.open(dest) as previous:
-            if previous.size == image.size and previous.convert("RGBA").tobytes() == image.tobytes():
+    if destination.exists():
+        with Image.open(destination) as prev:
+            if prev.size == image.size and prev.convert("RGBA").tobytes() == image.tobytes():
                 return False
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    image.save(dest, "PNG", optimize=True)
-    print("updated", dest.relative_to(ROOT))
+    if dry_run:
+        print("Would update:", destination.relative_to(ROOT))
+        return True
+    destination.parent.mkdir(exist_ok=True, parents=True)
+    image.save(destination, optimize=True)
+    print("Updated:", destination.relative_to(ROOT))
     return True
 
 
-def strip_mipmap_strip(im: Image.Image) -> Image.Image:
-    # Original icon PNGs are 120x64 (64 + 32 + 16 + 8 mipmap strip).
-    # The fork's prototype files point to regular 64x64 single-mip icons.
-    if im.size == (120, 64):
-        return im.crop((0, 0, 64, 64))
-    if im.size == (64, 64):
-        return im
-    raise ValueError(f"Unexpected source icon dimensions: {im.size}")
-
-
-def texture_noise(width: int, height: int, seed: int, cell: int) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    low = rng.integers(
-        0, 256, (max(3, height // cell), max(3, width // cell)),
-        dtype=np.uint8
-    )
-    smooth = Image.fromarray(low, "L").resize(
-        (width, height), Image.Resampling.BICUBIC
-    )
-    return np.asarray(smooth, dtype=np.float32) / 255.0
-
-
-def repigment(im: Image.Image, family: str, key: str, is_icon: bool) -> Image.Image:
-    """Recolour the surfaces using several mineral pigments, not a hue overlay.
-
-    Spatially coherent patches expose dark rock, bright crystals and inclusions.
-    The old image supplies facet structure, occlusion, silhouettes and alpha.
-    """
-    rgba = np.asarray(im.convert("RGBA"), dtype=np.uint8).copy()
-    height, width, _ = rgba.shape
-    original = rgba[:, :, :3].astype(np.float32)
-    lum = original @ np.array([0.24, 0.67, 0.09], dtype=np.float32)
-    seed = zlib.crc32((family + ":" + key).encode("utf-8"))
-    patches = texture_noise(width, height, seed, 10 if is_icon else 22)
-    veins = texture_noise(width, height, seed ^ 0xA59F32D1, 4 if is_icon else 8)
-    pigment = np.empty_like(original)
-    colors = [np.array(c, dtype=np.float32) for c in PALETTES[family]]
-    pigment[:] = colors[0]
-    pigment[patches > 0.48] = colors[1]
-    pigment[(patches > 0.61) & (veins > 0.42)] = colors[2]
-    pigment[(patches > 0.72) & (veins > 0.66) & (lum > 82)] = colors[3]
-
-    # Respect source shading: lower luminance stays in shadow; bright areas shine.
-    surface_light = np.clip(0.30 + lum / 260.0, 0.34, 1.05)
-    mineral = pigment * surface_light[:, :, None]
-    # Keep a portion of the existing material's facet colour and shading.
-    result = 0.31 * original + 0.69 * mineral
-    rgba[:, :, :3] = np.clip(result, 0, 255).astype(np.uint8)
-    return Image.fromarray(rgba, "RGBA")
-
-
-def refresh_custom_icon(
-    current: Image.Image,
-    family: str,
-    filename: str,
-    arrow_reference: Image.Image,
-) -> Image.Image:
-    output = repigment(current, family, filename, is_icon=True)
-    if filename.endswith("-crushing.png") and not filename.startswith("advanced-"):
-        arr = np.asarray(output).copy()
-        upstream = np.asarray(arrow_reference)
-        y = np.arange(64)[:, None]
-        # The upstream's actual warm-gold crushing chevrons, not a recoloured rock.
-        arrow_pixels = (
-            (y > 23)
-            & (upstream[:, :, 0] > 145)
-            & (upstream[:, :, 1] > 95)
-            & (upstream[:, :, 2] < 125)
-            & (upstream[:, :, 3] > 40)
-            & (arr[:, :, 3] > 40)
-        )
-        arr[arrow_pixels, :3] = upstream[arrow_pixels, :3]
-        output = Image.fromarray(arr, "RGBA")
-    return output
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true", help="Report edits, don't write them")
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Preview changed paths without writing")
     args = parser.parse_args()
-    zf = upstream_archive()
-    # The pre-overhaul fork snapshot is used for every custom-family pass.
-    # This makes reruns idempotent, rather than layering repeated colour edits.
-    fork_zf = upstream_archive(FORK_BASE_ZIP)
+    zf = download_source()
     changes = 0
-    icons = ROOT / "graphics" / "icons"
-    entity_root = ROOT / "graphics" / "entity" / "asteroid"
-    standard_arrow = strip_mipmap_strip(
-        image_from_zip(zf, "graphics/icons/chemical-asteroid-crushing.png")
-    )
+    counts = {}
 
-    # For five upstream families, prefer the original high-detail material pixels.
-    # All size tiers and both recipe icons are included, not merely the chunk.
-    for family in RESTORED:
-        for path in sorted(icons.glob("*.png")):
-            if path.name.endswith(f"-{family}-asteroid.png") or (
-                path.name in (f"{family}-asteroid-chunk.png",
-                              f"{family}-asteroid-crushing.png",
-                              f"advanced-{family}-asteroid-crushing.png")
-            ):
-                original = strip_mipmap_strip(
-                    image_from_zip(zf, "graphics/icons/" + path.name)
+    for family, parent in PARENTS.items():
+        for pattern in ICON_PATTERNS:
+            dest = ROOT / "graphics" / "icons" / pattern.format(f=family)
+            upstream = original_icon(zf, pattern.format(f=parent))
+            if family not in ORIGINAL_FAMILIES:
+                upstream, ratio = isolate_inclusions(
+                    upstream, family,
+                    standard_recipe=(pattern == "{f}-asteroid-crushing.png"),
                 )
-                if args.check:
-                    print("would restore", path.relative_to(ROOT))
-                else:
-                    changes += save_if_changed(original, path)
-        for path in sorted((entity_root / family).rglob("*-colour-*.png")):
-            rel = path.relative_to(ROOT).as_posix()
-            original = image_from_zip(zf, rel)
-            with Image.open(path) as current:
-                if original.size != current.size:
-                    raise ValueError(f"Colour layer dimensions mismatch: {rel}")
-            if args.check:
-                print("would restore", rel)
-            else:
-                changes += save_if_changed(original, path)
+                counts.setdefault(family, []).append(ratio)
+            changes += int(emit(upstream, dest, args.check))
 
-    # Custom families have their own asteroid silhouettes. Retain those images
-    # and add contrasting mineral inclusions rather than replacing their shapes.
-    for family in CUSTOM:
-        for path in sorted(icons.glob("*.png")):
-            if not (
-                path.name.endswith(f"-{family}-asteroid.png")
-                or path.name in (f"{family}-asteroid-chunk.png",
-                                 f"{family}-asteroid-crushing.png",
-                                 f"advanced-{family}-asteroid-crushing.png")
-            ):
-                continue
-            original = image_from_zip(fork_zf, path.relative_to(ROOT).as_posix())
-            result = refresh_custom_icon(original, family, path.name, standard_arrow)
-            if args.check:
-                print("would retouch", path.relative_to(ROOT))
-            else:
-                changes += save_if_changed(result, path)
-        for path in sorted((entity_root / family).rglob("*-colour-*.png")):
-            original = image_from_zip(fork_zf, path.relative_to(ROOT).as_posix())
-            result = repigment(original, family, path.name, is_icon=False)
-            if args.check:
-                print("would retouch", path.relative_to(ROOT))
-            else:
-                changes += save_if_changed(result, path)
+        for size in SIZES:
+            source_name = f"asteroid-{parent}-{size}-colour-01.png"
+            target_name = f"asteroid-{family}-{size}-colour-01.png"
+            src = open_source(
+                zf,
+                f"graphics/entity/asteroid/{parent}/{size}/{source_name}",
+            )
+            dest = ROOT / "graphics" / "entity" / "asteroid" / family / size / target_name
+            # The scene uses only the colour diffuse layer. Its corresponding
+            # Space Age normal/roughness map must match the chosen source shape.
+            if family not in ORIGINAL_FAMILIES:
+                src, ratio = isolate_inclusions(src, family)
+                counts.setdefault(family, []).append(ratio)
+            changes += int(emit(src, dest, args.check))
 
-    print(f"Graphics refresh complete: {changes} updated files")
-    # An unchanged second run is valid: all renders are derived from pinned inputs.
+    for family, ratios in counts.items():
+        print(f"{family}: selected-pigment coverage {min(ratios):.1%}–{max(ratios):.1%}; "
+              "all other pixels preserved from original sprites")
+    print(f"Finished: {changes} changed graphics files")
 
 
 if __name__ == "__main__":
