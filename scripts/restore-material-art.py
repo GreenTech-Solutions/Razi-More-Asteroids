@@ -107,6 +107,12 @@ def isolate_inclusions(image, family, standard_recipe=False):
         raise ValueError(f"Not a custom family: {family}")
     mask &= a > 48
 
+    if standard_recipe:
+        # The original icon's golden crushing arrows occupy the lower half.
+        # Never recolour arrows or their existing highlights.
+        row_index = np.arange(image.height, dtype=np.int32)[:, None]
+        mask &= row_index < 30
+
     # Keep only the brightest exposed mineral inclusions, never an entire
     # contiguous asteroid surface. The cap is applied to each original PNG
     # individually, allowing for the different small/huge/recipe silhouettes.
@@ -124,12 +130,6 @@ def isolate_inclusions(image, family, standard_recipe=False):
         candidates = score[mask]
         cutoff = np.partition(candidates, -max_selected)[-max_selected]
         mask &= score >= cutoff
-
-    if standard_recipe:
-        # The original icon's golden crushing arrows occupy the lower half.
-        # Never recolour arrows or their existing highlights.
-        row_index = np.arange(image.height, dtype=np.int32)[:, None]
-        mask &= row_index < 30
 
     hsv = np.asarray(image.convert("RGB").convert("HSV")).copy()
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
