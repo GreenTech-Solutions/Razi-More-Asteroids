@@ -98,7 +98,7 @@ def isolate_inclusions(image, family, standard_recipe=False):
     r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
     a = original[:, :, 3]
     if family == "crystalline":
-        mask = (r > 118) & (r > 1.32 * g) & (r > 1.36 * b) & ((r - g) > 25)
+        mask = (r > 158) & (r > 1.42 * g) & (r > 1.43 * b) & ((r - g) > 42)
     elif family == "halide":
         mask = (g > 109) & (g > 1.07 * r) & (g > 1.08 * b) & ((g - b) > 18)
     elif family == "electrostatic":
