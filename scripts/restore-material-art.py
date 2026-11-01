@@ -22,6 +22,10 @@ ORIGINAL_ZIP = (
     "https://codeload.github.com/spartanlaser32/More-Asteroids/zip/"
     + ORIGINAL_COMMIT
 )
+FORK_BASE_ZIP = (
+    "https://codeload.github.com/Raziphel/Razi-More-Asteroids/zip/"
+    "57cf549e9a3db9694cc733e37a4310dc83cd5302"
+)
 RESTORED = ("chemical", "organic", "rock", "scrap", "uranium")
 CUSTOM = ("crystalline", "electrostatic", "halide")
 # Dark matrix, main mineral, secondary inclusion, and a sparing bright inclusion.
@@ -38,9 +42,9 @@ PALETTES = {
 }
 
 
-def upstream_archive() -> zipfile.ZipFile:
+def upstream_archive(url: str = ORIGINAL_ZIP) -> zipfile.ZipFile:
     req = urllib.request.Request(
-        ORIGINAL_ZIP, headers={"User-Agent": "Razi-More-Asteroids-art-refresh"}
+        url, headers={"User-Agent": "Razi-More-Asteroids-art-refresh"}
     )
     with urllib.request.urlopen(req, timeout=60) as response:
         payload = response.read(25_000_001)
@@ -106,15 +110,15 @@ def repigment(im: Image.Image, family: str, key: str, is_icon: bool) -> Image.Im
     pigment = np.empty_like(original)
     colors = [np.array(c, dtype=np.float32) for c in PALETTES[family]]
     pigment[:] = colors[0]
-    pigment[patches > 0.43] = colors[1]
-    pigment[(patches > 0.56) & (veins > 0.40)] = colors[2]
-    pigment[(patches > 0.64) & (veins > 0.62) & (lum > 82)] = colors[3]
+    pigment[patches > 0.48] = colors[1]
+    pigment[(patches > 0.61) & (veins > 0.42)] = colors[2]
+    pigment[(patches > 0.72) & (veins > 0.66) & (lum > 82)] = colors[3]
 
     # Respect source shading: lower luminance stays in shadow; bright areas shine.
-    surface_light = np.clip(0.36 + lum / 155.0, 0.35, 1.50)
+    surface_light = np.clip(0.30 + lum / 260.0, 0.34, 1.05)
     mineral = pigment * surface_light[:, :, None]
     # Keep a portion of the existing material's facet colour and shading.
-    result = 0.23 * original + 0.77 * mineral
+    result = 0.31 * original + 0.69 * mineral
     rgba[:, :, :3] = np.clip(result, 0, 255).astype(np.uint8)
     return Image.fromarray(rgba, "RGBA")
 
@@ -149,6 +153,9 @@ def main() -> None:
     parser.add_argument("--check", action="store_true", help="Report edits, don't write them")
     args = parser.parse_args()
     zf = upstream_archive()
+    # The pre-overhaul fork snapshot is used for every custom-family pass.
+    # This makes reruns idempotent, rather than layering repeated colour edits.
+    fork_zf = upstream_archive(FORK_BASE_ZIP)
     changes = 0
     icons = ROOT / "graphics" / "icons"
     entity_root = ROOT / "graphics" / "entity" / "asteroid"
@@ -194,16 +201,14 @@ def main() -> None:
                                  f"advanced-{family}-asteroid-crushing.png")
             ):
                 continue
-            with Image.open(path) as current:
-                original = current.convert("RGBA")
+            original = image_from_zip(fork_zf, path.relative_to(ROOT).as_posix())
             result = refresh_custom_icon(original, family, path.name, standard_arrow)
             if args.check:
                 print("would retouch", path.relative_to(ROOT))
             else:
                 changes += save_if_changed(result, path)
         for path in sorted((entity_root / family).rglob("*-colour-*.png")):
-            with Image.open(path) as current:
-                original = current.convert("RGBA")
+            original = image_from_zip(fork_zf, path.relative_to(ROOT).as_posix())
             result = repigment(original, family, path.name, is_icon=False)
             if args.check:
                 print("would retouch", path.relative_to(ROOT))
