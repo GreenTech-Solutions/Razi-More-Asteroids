@@ -27,7 +27,7 @@ ORIGINAL_ZIP = (
 )
 
 # Parent artwork determines geometry AND the matching Space Age normal map.
-# See asteroid_map in asteroids.lua: carbonic for petrified, metallic for scrap,
+# See asteroid_map in asteroids.lua: metallic for rock and scrap,
 # oxide for chemical.
 PARENTS = {
     "chemical": "chemical",
@@ -35,7 +35,7 @@ PARENTS = {
     "rock": "rock",
     "scrap": "scrap",
     "uranium": "uranium",
-    "crystalline": "petrified",
+    "crystalline": "rock",
     "halide": "chemical",
     "electrostatic": "scrap",
 }
@@ -84,8 +84,8 @@ def original_icon(zf, name):
 def isolate_inclusions(image, family, standard_recipe=False):
     """Select only source-material pigments. No global hue/tint replacement.
 
-    crystalline: bright ochre-orange mineral inclusions in petrified rock;
-                 preserve the original dark carbonic rock matrix.
+    crystalline: cooler silicate/steel-blue mineral facets in original grey rock;
+                 preserve the source dark stone and iron-rich matrix.
     halide:      bright jade streaks in oxide rock; preserve original muted
                  turquoise/green rock and deep crevices.
     electrostatic: warm oxidised metal flakes in the scrap asteroid; preserve
@@ -98,7 +98,7 @@ def isolate_inclusions(image, family, standard_recipe=False):
     r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
     a = original[:, :, 3]
     if family == "crystalline":
-        mask = (r > 158) & (r > 1.42 * g) & (r > 1.43 * b) & ((r - g) > 42)
+        mask = (b > 85) & (b > 1.025 * g) & (b > 1.045 * r) & ((b - r) > 9)
     elif family == "halide":
         mask = (g > 109) & (g > 1.07 * r) & (g > 1.08 * b) & ((g - b) > 18)
     elif family == "electrostatic":
@@ -122,7 +122,7 @@ def isolate_inclusions(image, family, standard_recipe=False):
     max_selected = max(1, int(visible * coverage_limit))
     if np.count_nonzero(mask) > max_selected:
         if family == "crystalline":
-            score = r * 0.55 + (r - g) * 1.25 + (r - b) * 0.5
+            score = b * 0.65 + (b - r) * 1.4 + (b - g) * 0.70
         elif family == "halide":
             score = g * 0.50 + (g - b) * 1.5 + (g - r) * 0.25
         else:
@@ -135,12 +135,12 @@ def isolate_inclusions(image, family, standard_recipe=False):
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
     if family == "crystalline":
-        # Frost-blue quartz highlights in naturally dark fossilised stone.
-        # Preserve per-pixel brightness variations that form crystal facets.
-        cooler = (g > 75)
-        h[mask] = np.where(cooler[mask], 139, 163).astype(np.uint8)
-        s[mask] = np.where(cooler[mask], 100, 117).astype(np.uint8)
-        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 8).astype(np.uint8)
+        # Pale blue quartz seams in original natural slate-grey rock.
+        # Preserve per-pixel brightness and the existing detailed mineral faces.
+        cooler = (g > 89)
+        h[mask] = np.where(cooler[mask], 138, 151).astype(np.uint8)
+        s[mask] = np.where(cooler[mask], 102, 120).astype(np.uint8)
+        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 23).astype(np.uint8)
     elif family == "halide":
         # Icy lilac salt inclusions. Dark surrounding green rock remains original.
         colder = (b > 55)
