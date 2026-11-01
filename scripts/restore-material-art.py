@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Rebuild More Asteroids artwork from original, high-detail source PNGs.
+"""Restore the original More Asteroids sprites and add tightly masked new minerals.
 
-The source is the MIT-licensed spartanlaser32/More-Asteroids repo, pinned below.
-All replacements are independently rebuilt from source, not re-tinted fork images.
+Only the crystalline, halide and electrostatic *asteroid body material* is
+modified. An unchanged upstream pixel remains identical in the output. No
+filters are run on whole sprites, transparent pixels, crushing arrows or
+advanced-crushing product fragments.
 
-The five original families are restored without colour changes. The three new
-families replace only specific pigments/inclusions of carefully chosen original
-materials. All other pixels, local shading, fracture detail and alpha stay intact.
+Run: python scripts/restore-material-art.py
+Source art copyright spartanlaser32; MIT licence retained in root LICENSE.
 """
 from __future__ import annotations
 
@@ -17,30 +18,20 @@ import urllib.request
 import zipfile
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
-ORIGINAL_COMMIT = "ba209beccc0ad363a155e8ced0e3967f2997d500"
-ORIGINAL_ZIP = (
-    "https://codeload.github.com/spartanlaser32/More-Asteroids/zip/"
-    + ORIGINAL_COMMIT
-)
+UPSTREAM_SHA = "ba209beccc0ad363a155e8ced0e3967f2997d500"
+UPSTREAM_ZIP = "https://codeload.github.com/spartanlaser32/More-Asteroids/zip/" + UPSTREAM_SHA
 
-# Parent artwork determines geometry AND the matching Space Age normal map.
-# See asteroid_map in asteroids.lua: metallic for rock and scrap,
-# oxide for chemical.
-PARENTS = {
-    "chemical": "chemical",
-    "organic": "organic",
-    "rock": "rock",
-    "scrap": "scrap",
-    "uranium": "uranium",
+# Never touch these five families' upstream art.
+ORIGINALS = ("chemical", "organic", "rock", "scrap", "uranium")
+# Use geometry-matched original asteroid material as the source.
+NEW_FAMILIES = {
     "crystalline": "rock",
     "halide": "chemical",
     "electrostatic": "scrap",
 }
-ORIGINAL_FAMILIES = ("chemical", "organic", "rock", "scrap", "uranium")
-CUSTOM_FAMILIES = ("crystalline", "halide", "electrostatic")
 SIZES = ("chunk", "small", "medium", "big", "huge")
 ICON_PATTERNS = (
     "{f}-asteroid-chunk.png",
@@ -52,176 +43,206 @@ ICON_PATTERNS = (
     "huge-{f}-asteroid.png",
 )
 
-
-def download_source():
-    req = urllib.request.Request(
-        ORIGINAL_ZIP, headers={"User-Agent": "Razi-More-Asteroids-source-art"}
-    )
-    with urllib.request.urlopen(req, timeout=60) as response:
-        blob = response.read(25_000_001)
-    if len(blob) > 25_000_000:
-        raise ValueError("Source archive exceeded expected size")
-    return zipfile.ZipFile(io.BytesIO(blob))
+# A small fraction of the *asteroid body*, NOT the whole icon.
+# Matte, believable minerals rather than pure, saturated RGB primaries.
+ART = {
+    "crystalline": {"coverage": 0.095, "colour": (93, 152, 185), "blend": 0.57},
+    "halide": {"coverage": 0.095, "colour": (166, 131, 185), "blend": 0.58},
+    "electrostatic": {"coverage": 0.105, "colour": (105, 116, 191), "blend": 0.57},
+}
 
 
-def open_source(zf, path):
-    matches = [key for key in zf.namelist() if key.endswith("/" + path)]
-    if len(matches) != 1:
-        raise FileNotFoundError(f"Source asset not unique or absent: {path}")
-    return Image.open(io.BytesIO(zf.read(matches[0]))).convert("RGBA")
+def source_archive():
+    request = urllib.request.Request(UPSTREAM_ZIP, headers={"User-Agent": "More-Asteroids-graphics"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        payload = response.read(26_000_000)
+    if len(payload) >= 26_000_000:
+        raise ValueError("Upstream archive unexpectedly large")
+    return zipfile.ZipFile(io.BytesIO(payload))
 
 
-def original_icon(zf, name):
-    image = open_source(zf, "graphics/icons/" + name)
-    # Upstream is a complete 120x64 mip strip. The fork expects a 64x64 icon.
-    if image.size == (120, 64):
-        return image.crop((0, 0, 64, 64))
-    if image.size == (64, 64):
-        return image
-    raise ValueError(f"Unexpected icon format {name} = {image.size}")
+def read_upstream(zf, path):
+    items = [k for k in zf.namelist() if k.endswith("/" + path)]
+    if len(items) != 1:
+        raise FileNotFoundError(path)
+    return Image.open(io.BytesIO(zf.read(items[0]))).convert("RGBA")
 
 
-def isolate_inclusions(image, family, standard_recipe=False):
-    """Select only source-material pigments. No global hue/tint replacement.
+def source_icon(zf, filename):
+    im = read_upstream(zf, "graphics/icons/" + filename)
+    if im.size == (120, 64):
+        return im.crop((0, 0, 64, 64))  # main mip; no change to real sprite pixels
+    if im.size == (64, 64):
+        return im
+    raise ValueError(f"Unexpected upstream icon dimensions: {filename} {im.size}")
 
-    crystalline: cooler silicate/steel-blue mineral facets in original grey rock;
-                 preserve the source dark stone and iron-rich matrix.
-    halide:      bright jade streaks in oxide rock; preserve original muted
-                 turquoise/green rock and deep crevices.
-    electrostatic: warm oxidised metal flakes in the scrap asteroid; preserve
-                 blue/steel metal, metal ridges and all shadows.
 
-    A pixel outside the mask is copied EXACTLY from upstream, bit for bit.
+def material_mask(img, family, icon_kind):
+    """Build *semantic* mask using sprite geometry and source material signatures.
+
+    The crusher and advanced-crusher masks are intentionally conservative:
+    only the primary asteroid body in the upper-left is eligible.
+    The arrows, miniatures, result items and background are hard-excluded.
+    The surface score is smoothed ONLY for mask selection, never for output.
     """
-    original = np.asarray(image.convert("RGBA")).copy()
-    rgb = original[:, :, :3].astype(np.float32)
-    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
-    a = original[:, :, 3]
-    if family == "crystalline":
-        mask = (b > 48) & (b > 0.95 * g) & (b > 0.93 * r) & ((b - r) > -12)
-    elif family == "halide":
-        mask = (g > 109) & (g > 1.07 * r) & (g > 1.08 * b) & ((g - b) > 18)
-    elif family == "electrostatic":
-        mask = (r > 105) & (r > 1.18 * g) & (r > 1.20 * b) & ((r - g) > 22)
+    rgba = np.asarray(img, dtype=np.uint8)
+    h, w = rgba.shape[:2]
+    r, g, b = [rgba[:, :, i].astype(np.float32) for i in range(3)]
+    a = rgba[:, :, 3]
+    yy, xx = np.mgrid[:h, :w]
+    allowed = a > 224
+
+    # Leave antialiased outer perimeter and all transparent pixels alone.
+    allowed &= np.asarray(
+        Image.fromarray((allowed * 255).astype(np.uint8), "L")
+        .filter(ImageFilter.MinFilter(3 if max(h, w) <= 128 else 5))
+    ) > 0
+
+    if icon_kind == "crushing":
+        # The full chevron area (including grey rock arrows) is protected
+        # geometrically, NOT using unreliable yellow-colour detection.
+        allowed &= (xx < 39) & (yy < 27)
+    elif icon_kind == "advanced":
+        # Advanced recipes include other resources: never edit those outputs.
+        allowed &= (xx < 38) & (yy < 36)
+    elif icon_kind == "single":
+        # These icons contain only the asteroid plus transparent background.
+        pass
+    elif icon_kind == "entity":
+        pass
     else:
-        raise ValueError(f"Not a custom family: {family}")
-    mask &= a > 48
+        raise ValueError(icon_kind)
 
-    if standard_recipe:
-        # The original icon's crushing arrows occupy the lower half.
-        # Never recolour arrows or their existing highlights.
-        row_index = np.arange(image.height, dtype=np.int32)[:, None]
-        mask &= row_index < 30
-
-    # Keep only the brightest exposed mineral inclusions, never an entire
-    # contiguous asteroid surface. The cap is applied to each original PNG
-    # individually, allowing for the different small/huge/recipe silhouettes.
-    # Pixel selection is based on original material luminance/chroma only.
-    coverage_limit = {"crystalline": 0.26, "halide": 0.19, "electrostatic": 0.24}[family]
-    visible = int(np.count_nonzero(a > 48))
-    max_selected = max(1, int(visible * coverage_limit))
-    if np.count_nonzero(mask) > max_selected:
-        if family == "crystalline":
-            score = b * 0.65 + (b - r) * 1.4 + (b - g) * 0.70
-        elif family == "halide":
-            score = g * 0.50 + (g - b) * 1.5 + (g - r) * 0.25
-        else:
-            score = r * 0.60 + (r - g) * 1.35 + (r - b) * 0.20
-        candidates = score[mask]
-        cutoff = np.partition(candidates, -max_selected)[-max_selected]
-        mask &= score >= cutoff
-
-    hsv = np.asarray(image.convert("RGB").convert("HSV")).copy()
-    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-
+    # Original asteroid material signatures: no random noise, no changes to
+    # unrelated materials, no global hue shift or saturation adjustments.
+    lum = 0.24 * r + 0.68 * g + 0.08 * b
     if family == "crystalline":
-        # Pale blue quartz seams in original natural slate-grey rock.
-        # Preserve per-pixel brightness and the existing detailed mineral faces.
-        cooler = (g > 89)
-        h[mask] = np.where(cooler[mask], 138, 151).astype(np.uint8)
-        s[mask] = np.where(cooler[mask], 102, 120).astype(np.uint8)
-        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 23).astype(np.uint8)
+        # Cool, exposed grey-rock mineral faces rather than its rusty matrix.
+        eligible = (b > 49) & (b >= r - 13) & (b >= g - 8)
+        score = 0.47 * b + 1.60 * (b - r) + 0.50 * (b - g) + 0.12 * lum
     elif family == "halide":
-        # Icy lilac salt inclusions. Dark surrounding green rock remains original.
-        colder = (b > 55)
-        h[mask] = np.where(colder[mask], 183, 173).astype(np.uint8)
-        s[mask] = np.where(colder[mask], 93, 112).astype(np.uint8)
-        v[mask] = np.minimum(255, v[mask].astype(np.int16) + 5).astype(np.uint8)
+        # Only naturally green, illuminated veins inside oxide stone.
+        eligible = (g > 69) & (g > r + 3) & (g > b + 4)
+        score = 0.50 * g + 1.00 * (g - r) + 0.95 * (g - b) + 0.12 * lum
     else:
-        # Swap rusty-orange ONLY into violet/cyan electrically conductive seams.
-        bright = (r > 161)
-        h[mask] = np.where(bright[mask], 173, 190).astype(np.uint8)
-        s[mask] = np.where(bright[mask], 168, 136).astype(np.uint8)
+        # Rust-coloured inclusions of upstream scrap; leave steel intact.
+        eligible = (r > 73) & (r > g + 11) & (r > b + 10)
+        score = 0.35 * r + 1.17 * (r - g) + 1.32 * (r - b) + 0.08 * lum
 
-    toned = np.asarray(Image.fromarray(hsv, "HSV").convert("RGB"))
-    changed = original.copy()
-    changed[mask, :3] = toned[mask]
-    output = Image.fromarray(changed, "RGBA")
+    allowed &= eligible
+    if not np.any(allowed):
+        # Leave this particular source unchanged rather than painting some
+        # other component or relaxing a semantic mask to meet a quota.
+        return np.zeros((h, w), dtype=bool), 0.0
 
-    assert np.array_equal(original[:, :, 3], changed[:, :, 3])
-    changed_pixels = np.any(original[:, :, :3] != changed[:, :, :3], axis=2)
-    opaque = original[:, :, 3] > 48
-    ratio = float(np.count_nonzero(changed_pixels & opaque)) / max(1, int(np.count_nonzero(opaque)))
-    # A strict ceiling catches accidental blanket transformations or arrow recolour.
-    if not 0.005 <= ratio <= 0.48:
-        raise ValueError(f"{family}: changed {ratio:.1%} of visible pixels; expected selected inclusions only")
-    return output, ratio
+    radius = 0.85 if max(h, w) <= 128 else max(1.5, min(4.5, max(h, w) / 100))
+    # Smooth only the ranking scores to favour connected mineral faces rather
+    # than pixel noise. The original RGB pixels are never blurred.
+    floating_score = (score - score.min()) / max(0.001, score.max() - score.min())
+    smooth = np.asarray(
+        Image.fromarray(np.uint8(floating_score * 255), "L")
+        .filter(ImageFilter.GaussianBlur(radius)),
+        dtype=np.float32
+    )
+
+    # The coverage limit applies to opaque source ASTEROID pixels. For crushers
+    # restrict selection further to the body rectangle, never arrows/products.
+    full_body = rgba[:, :, 3] > 224
+    if icon_kind in ("crushing", "advanced"):
+        full_body &= (xx < 39) & (yy < (27 if icon_kind == "crushing" else 36))
+    max_count = max(1, round(np.count_nonzero(full_body) * ART[family]["coverage"]))
+    candidate_count = np.count_nonzero(allowed)
+    if candidate_count > max_count:
+        threshold = np.partition(smooth[allowed], -max_count)[-max_count]
+        allowed &= smooth >= threshold
+        # Keep an exact upper bound in case tied gradient pixels sit at threshold.
+        ys, xs = np.where(allowed)
+        if len(ys) > max_count:
+            ranked = np.argsort(smooth[ys, xs], kind="stable")[::-1][:max_count]
+            limited = np.zeros_like(allowed)
+            limited[ys[ranked], xs[ranked]] = True
+            allowed = limited
+    actual_coverage = np.count_nonzero(allowed) / max(1, np.count_nonzero(full_body))
+    assert actual_coverage <= ART[family]["coverage"] + 0.002
+    return allowed, actual_coverage
 
 
-def emit(image, destination, dry_run):
-    image = image.convert("RGBA")
+def alter_only_mineral(img, family, kind):
+    original = np.asarray(img.convert("RGBA")).copy()
+    mask, coverage = material_mask(img, family, kind)
+    output = original.copy()
+    if np.any(mask):
+        colour = np.asarray(ART[family]["colour"], dtype=np.float32)
+        blend = ART[family]["blend"]
+        source = original[:, :, :3].astype(np.float32)
+        # Preserve the inherited stone/metal face lighting and local roughness.
+        light = (0.72 + np.mean(source, axis=2) / 290.0)
+        pigment = colour[None, None, :] * light[:, :, None]
+        mixed = (1 - blend) * source + blend * pigment
+        output[:, :, :3][mask] = np.clip(mixed[mask], 0, 255).astype(np.uint8)
+
+    # These pixel-identity checks are essential. They prove that the arrows,
+    # transparent background, resource outputs, and non-target mineral surfaces
+    # are copied unmodified from the upstream originals.
+    assert np.array_equal(output[:, :, 3], original[:, :, 3])
+    assert np.array_equal(output[~mask], original[~mask])
+    if kind == "crushing":
+        assert np.array_equal(output[27:, :, :], original[27:, :, :])
+        assert np.array_equal(output[:, 39:, :], original[:, 39:, :])
+    if kind == "advanced":
+        assert np.array_equal(output[36:, :, :], original[36:, :, :])
+        assert np.array_equal(output[:, 38:, :], original[:, 38:, :])
+    return Image.fromarray(output, "RGBA"), coverage
+
+
+def write_if_changed(im, destination, check):
     if destination.exists():
-        with Image.open(destination) as prev:
-            if prev.size == image.size and prev.convert("RGBA").tobytes() == image.tobytes():
+        with Image.open(destination) as current:
+            if current.size == im.size and current.convert("RGBA").tobytes() == im.tobytes():
                 return False
-    if dry_run:
-        print("Would update:", destination.relative_to(ROOT))
+    if check:
+        print("Would change:", destination.relative_to(ROOT))
         return True
-    destination.parent.mkdir(exist_ok=True, parents=True)
-    image.save(destination, optimize=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    im.save(destination, format="PNG", optimize=True)
     print("Updated:", destination.relative_to(ROOT))
     return True
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Preview changed paths without writing")
-    args = parser.parse_args()
-    zf = download_source()
-    changes = 0
-    counts = {}
-
-    for family, parent in PARENTS.items():
-        for pattern in ICON_PATTERNS:
-            dest = ROOT / "graphics" / "icons" / pattern.format(f=family)
-            upstream = original_icon(zf, pattern.format(f=parent))
-            if family not in ORIGINAL_FAMILIES:
-                upstream, ratio = isolate_inclusions(
-                    upstream, family,
-                    standard_recipe=(pattern == "{f}-asteroid-crushing.png"),
-                )
-                counts.setdefault(family, []).append(ratio)
-            changes += int(emit(upstream, dest, args.check))
-
-        for size in SIZES:
-            source_name = f"asteroid-{parent}-{size}-colour-01.png"
-            target_name = f"asteroid-{family}-{size}-colour-01.png"
-            src = open_source(
-                zf,
-                f"graphics/entity/asteroid/{parent}/{size}/{source_name}",
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--check", action="store_true", help="Report differences without writing files")
+    opts = p.parse_args()
+    archive = source_archive()
+    total = 0
+    fractions = {}
+    for family in (*ORIGINALS, *NEW_FAMILIES):
+        parent = NEW_FAMILIES.get(family, family)
+        for pat in ICON_PATTERNS:
+            name = pat.format(f=parent)
+            art = source_icon(archive, name)
+            kind = "crushing" if pat == "{f}-asteroid-crushing.png" else (
+                "advanced" if pat.startswith("advanced-") else "single"
             )
-            dest = ROOT / "graphics" / "entity" / "asteroid" / family / size / target_name
-            # The scene uses only the colour diffuse layer. Its corresponding
-            # Space Age normal/roughness map must match the chosen source shape.
-            if family not in ORIGINAL_FAMILIES:
-                src, ratio = isolate_inclusions(src, family)
-                counts.setdefault(family, []).append(ratio)
-            changes += int(emit(src, dest, args.check))
-
-    for family, ratios in counts.items():
-        print(f"{family}: selected-pigment coverage {min(ratios):.1%}–{max(ratios):.1%}; "
-              "all other pixels preserved from original sprites")
-    print(f"Finished: {changes} changed graphics files")
+            if family in NEW_FAMILIES:
+                art, ratio = alter_only_mineral(art, family, kind)
+                fractions.setdefault(family, []).append(ratio)
+            total += write_if_changed(
+                art, ROOT / "graphics/icons" / pat.format(f=family), opts.check
+            )
+        for size in SIZES:
+            name = f"asteroid-{parent}-{size}-colour-01.png"
+            art = read_upstream(archive, f"graphics/entity/asteroid/{parent}/{size}/{name}")
+            if family in NEW_FAMILIES:
+                art, ratio = alter_only_mineral(art, family, "entity")
+                fractions.setdefault(family, []).append(ratio)
+            destination = (ROOT / "graphics/entity/asteroid" / family / size /
+                           f"asteroid-{family}-{size}-colour-01.png")
+            total += write_if_changed(art, destination, opts.check)
+    for family, ratios in fractions.items():
+        print(f"{family}: inclusion coverage of the allowed asteroid body "
+              f"{min(ratios):.1%} to {max(ratios):.1%}. Everything else copied unchanged.")
+    print(f"Changed graphics: {total}")
 
 
 if __name__ == "__main__":
