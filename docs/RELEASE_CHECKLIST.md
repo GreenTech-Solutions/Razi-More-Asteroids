@@ -5,7 +5,7 @@ Status: **package-ready, engine validation pending**. Do not claim a completed i
 
 ## Packaging gate
 
-Build with the `git archive` command in README.md, using only the explicitly listed Factorio files. Check the ZIP root is `razi-more-asteroids_1.2.0/` and that `unzip -l` shows no `.exe`, `.bat`, `.ps1`, `.sh`, or `.py` entries. Developer scripts are maintained outside this mod repository. This packaging check is not an in-game test.
+Build with the `git archive` command in README.md, using only the explicitly listed Factorio files. Check the ZIP root is `razi-more-asteroids_1.2.0/` and that `unzip -l` shows no `.exe`, `.bat`, `.ps1`, `.sh`, or `.py` entries. The development repository includes a Python art generator, but the release archive must exclude it. This packaging check is not an in-game test.
 
 ## Required manual startup tests
 
@@ -22,6 +22,8 @@ Build with the `git archive` command in README.md, using only the explicitly lis
 - [ ] Test **Space Age routes = Off**: family prototypes still exist; extra location/route populations do not.
 - [ ] Optional: load with Null's K2SO Tweaks and Any Planet Start, if installed, and check that nothing resets their fields.
 - [ ] Inspect all 56 UI icons, 40 in-world sprites, and 144px thumbnail in-game; check all eight asteroid families for missing graphics.
+- [ ] Confirm source-based asteroid textures keep their natural colours in-game, with no coloured fill-light wash; the three custom families should have only small mineral accents.
+- [ ] Confirm the rendered basic/advanced recipe icons show the actual output item/fluid colours, and their crushing arrows are unaffected.
 - [ ] Verify a saved game can be reopened; back up any existing save with Crystalline prototypes now displayed as Dense-Metal and changed outputs.
 - [ ] Validate science progression and reasonable availability without unlocking high-tier resources too early.
 
