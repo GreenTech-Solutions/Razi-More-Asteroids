@@ -107,6 +107,24 @@ def isolate_inclusions(image, family, standard_recipe=False):
         raise ValueError(f"Not a custom family: {family}")
     mask &= a > 48
 
+    # Keep only the brightest exposed mineral inclusions, never an entire
+    # contiguous asteroid surface. The cap is applied to each original PNG
+    # individually, allowing for the different small/huge/recipe silhouettes.
+    # Pixel selection is based on original material luminance/chroma only.
+    coverage_limit = {"crystalline": 0.26, "halide": 0.19, "electrostatic": 0.24}[family]
+    visible = int(np.count_nonzero(a > 48))
+    max_selected = max(1, int(visible * coverage_limit))
+    if np.count_nonzero(mask) > max_selected:
+        if family == "crystalline":
+            score = r * 0.55 + (r - g) * 1.25 + (r - b) * 0.5
+        elif family == "halide":
+            score = g * 0.50 + (g - b) * 1.5 + (g - r) * 0.25
+        else:
+            score = r * 0.60 + (r - g) * 1.35 + (r - b) * 0.20
+        candidates = score[mask]
+        cutoff = np.partition(candidates, -max_selected)[-max_selected]
+        mask &= score >= cutoff
+
     if standard_recipe:
         # The original icon's golden crushing arrows occupy the lower half.
         # Never recolour arrows or their existing highlights.
