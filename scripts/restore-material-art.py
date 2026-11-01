@@ -48,9 +48,9 @@ ICON_PATTERNS = (
 ART = {
     # Relative RGB channel offsets apply ONLY to existing source material veins.
     # Offsets preserve every source facet, texture grain and shadow gradient.
-    "crystalline": {"coverage": 0.075, "delta": (-16, 5, 28)},
-    "halide": {"coverage": 0.065, "delta": (28, -18, 38)},
-    "electrostatic": {"coverage": 0.080, "delta": (-45, 20, 57)},
+    "crystalline": {"coverage": 0.075, "icon_coverage": 0.125, "delta": (-16, 5, 28)},
+    "halide": {"coverage": 0.065, "icon_coverage": 0.110, "delta": (28, -18, 38)},
+    "electrostatic": {"coverage": 0.080, "icon_coverage": 0.125, "delta": (-45, 20, 57)},
 }
 
 
@@ -152,7 +152,9 @@ def material_mask(img, family, icon_kind):
     full_body = rgba[:, :, 3] > 224
     if icon_kind in ("crushing", "advanced"):
         full_body &= (xx < 39) & (yy < (27 if icon_kind == "crushing" else 36))
-    max_count = max(1, round(np.count_nonzero(full_body) * ART[family]["coverage"]))
+    coverage_limit = (ART[family]["coverage"] if icon_kind == "entity"
+                      else ART[family]["icon_coverage"])
+    max_count = max(1, round(np.count_nonzero(full_body) * coverage_limit))
     candidate_count = np.count_nonzero(allowed)
     if candidate_count > max_count:
         threshold = np.partition(smooth[allowed], -max_count)[-max_count]
@@ -165,7 +167,7 @@ def material_mask(img, family, icon_kind):
             limited[ys[ranked], xs[ranked]] = True
             allowed = limited
     actual_coverage = np.count_nonzero(allowed) / max(1, np.count_nonzero(full_body))
-    assert actual_coverage <= ART[family]["coverage"] + 0.002
+    assert actual_coverage <= coverage_limit + 0.002
     return allowed, actual_coverage
 
 
@@ -224,7 +226,10 @@ def write_if_changed(im, destination, check):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--check", action="store_true", help="Report differences without writing files")
+    p.add_argument("--verify", action="store_true", help="Fail if committed art differs from deterministic source")
     opts = p.parse_args()
+    if opts.verify:
+        opts.check = True
     archive = source_archive()
     total = 0
     fractions = {}
@@ -255,6 +260,8 @@ def main():
         print(f"{family}: inclusion coverage of the allowed asteroid body "
               f"{min(ratios):.1%} to {max(ratios):.1%}. Everything else copied unchanged.")
     print(f"Changed graphics: {total}")
+    if opts.verify and total:
+        raise SystemExit(f"Generated {total} mismatching graphics; run without --verify to update them")
 
 
 if __name__ == "__main__":
